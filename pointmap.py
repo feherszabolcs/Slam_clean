@@ -12,6 +12,9 @@ class Map(object):
         self.state = None # variable to hold current state of the map and cam pose
         self.q = None # A queue for inter-process communication. | q for visualization process
         self.q_image = None
+        self.inliers = None
+        self.plane = None
+        
     def create_viewer(self):
         # Parallel Execution: The main purpose of creating this process is to run 
         # the `viewer_thread` method in parallel with the main program. 
@@ -73,7 +76,6 @@ class Map(object):
         self.dimg = pypangolin.Display('image')
         self.dimg.SetBounds(pypangolin.Attach(0), pypangolin.Attach(height / 768.),pypangolin.Attach(0.0), pypangolin.Attach(width / 1024.), 1024 / 768.)
         #self.dimg.SetLock(pypangolin.Lock.LockLeft, pypangolin.Lock.LockTop)
-
         self.texture = pypangolin.GlTexture(width, height, gl.GL_RGB, False, 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
         self.image = np.ones((height, width, 3), 'uint8')
 
@@ -112,6 +114,27 @@ class Map(object):
             gl.glVertex3f(point[0], point[1], point[2])
         gl.glEnd()
         
+        if self.state[2] is not None:
+            gl.glPointSize(4)
+            gl.glColor3f(0.0, 1.0, 0.0)
+            gl.glBegin(gl.GL_POINTS)
+            for idx in self.state[2]:
+                point = self.state[1][idx]
+                gl.glVertex3f(point[0], point[1], point[2])
+            gl.glEnd()
+
+        if hasattr(self, 'plane') and self.plane is not None:
+            normal = self.plane[:3]
+            d = self.plane[3]
+            gl.glPointSize(1)
+            gl.glColor3f(1.0, 1.0, 0.0)
+            gl.glBegin(gl.GL_POINTS)
+            for x in range(-10, 10):
+                for y in range(-10, 10):
+                    z = (-d - normal[0] * x - normal[1] * y) / normal[2]
+                    gl.glVertex3f(x, y, z)
+            gl.glEnd()
+        
         # show image
         if not self.q_image.empty():
             self.image = self.q_image.get()
@@ -149,6 +172,30 @@ class Map(object):
         # Remove outliers (in reverse order to avoid index issues)
         for idx in sorted(outlier_indices, reverse=True):
             self.points.pop(idx)
+
+    def downsample(self, voxel_size=0.1):
+        """Downsample the point cloud using a voxel grid filter"""
+        if len(self.points) < 50:  # Only run when we have enough points
+            return
+        
+        # Extract all point positions
+        positions = np.array([point.pt[:3] for point in self.points])
+        
+        # Compute voxel indices for each point
+        voxel_indices = np.floor(positions / voxel_size).astype(np.int32)
+        
+        # Use a dictionary to keep only one point per voxel
+        voxel_dict = {}
+        for idx, voxel_index in enumerate(voxel_indices):
+            voxel_key = tuple(voxel_index)
+            if voxel_key not in voxel_dict:
+                voxel_dict[voxel_key] = idx
+        
+        # Create a new list of points with only one point per voxel
+        downsampled_points = [self.points[idx] for idx in voxel_dict.values()]
+        
+        # Replace the original points with the downsampled points
+        self.points = downsampled_points    
 
     def filter_by_reprojection_error(self,K, error_threshold=2.0):
         """Remove points with high reprojection error"""
@@ -224,7 +271,7 @@ class Map(object):
             pts.append(p.pt)
         
         # updating queue
-        self.q.put((np.array(poses), np.array(pts)))
+        self.q.put((np.array(poses), np.array(pts), self.inliers, self.plane))
 
     def display_image(self, ip_image):
         # if self.q is None:

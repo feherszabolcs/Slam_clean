@@ -3,6 +3,7 @@ import glob
 from display import Display
 from extractor import Frame, denormalize, match_frames, add_ones
 import numpy as np
+import random
 from pointmap import Map, Point
 from utils import read_calibration_file, extract_intrinsic_matrix
 
@@ -39,6 +40,35 @@ def triangulate(pose1, pose2, pts1, pts2):
     return ret
 
 frame_counter = 0
+
+def ransac_plane_fitting(points, threshold=0.1, max_iterations=1000):
+    best_plane = None
+    best_inliers = []
+
+    for _ in range(max_iterations):
+        # Randomly sample 3 points
+        sample_indices = random.sample(range(points.shape[0]), 3)
+        sample_points = points[sample_indices]
+
+        # Fit a plane to these 3 points
+        p1, p2, p3 = sample_points
+        normal = np.cross(p2 - p1, p3 - p1)
+        normal = normal / np.linalg.norm(normal)
+        d = -np.dot(normal, p1)
+        plane = np.append(normal, d)
+
+        # Calculate distances of all points to the plane
+        distances = np.abs(np.dot(points, normal) + d)
+
+        # Identify inliers
+        inliers = np.where(distances < threshold)[0]
+
+        # Update the best plane if this one has more inliers
+        if len(inliers) > len(best_inliers):
+            best_plane = plane
+            best_inliers = inliers
+
+    return best_plane, best_inliers
 
 def process_frame(img):
     
@@ -94,13 +124,49 @@ def process_frame(img):
 
     if(frame_counter % 10 == 0 and len(mapp.points) > 50):
         mapp.filter_by_reprojection_error(K,3.0)
-        mapp.remove_radius_outliers(radius=1.0, min_neighbors=2)
+        # mapp.remove_radius_outliers(radius=1.0, min_neighbors=2)
+        mapp.downsample(voxel_size=0.1)
+
+    points = np.array([point.pt[:3] for point in mapp.points])
+    # points = pre_filter_points(points)
+
+
+    plane, inliers = ransac_plane_fitting(points)
+
+    mapp.inliers = inliers
+    mapp.plane = plane
+
+    print(f"RANSAC plane: {plane}")
+    print(f"Number of inliers: {len(inliers)}")
+
+    road_points = points[inliers]
+    non_road_points = np.delete(points, inliers, axis=0)
+
+    for pt in road_points:
+        u, v = denormalize(K, pt[:2])
+        cv2.circle(img, (u, v), 2, (0, 255, 0), -1)  # Green for inliers
+
+    # Visualize the non-road points (outliers)
+    for pt in non_road_points:
+        u, v = denormalize(K, pt[:2])
+        cv2.circle(img, (u, v), 2, (0, 0, 255), -1)  # Red for outliers
+
+    # Draw the plane (optional)
+    if plane is not None:
+        normal = plane[:3]
+        d = plane[3]
+        # Draw the plane as a grid of points
+        for x in range(-10, 10):
+            for y in range(-10, 10):
+                z = (-d - normal[0] * x - normal[1] * y) / normal[2]
+                pt = np.array([x, y, z])
+                u, v = denormalize(K, pt[:2])
+                cv2.circle(img, (u, v), 1, (255, 255, 0), -1)  # Yellow for plane points
 
     for pt1, pt2 in zip(f1.pts[idx1], f2.pts[idx2]):
         u1, v1 = denormalize(K, pt1)
         u2, v2 = denormalize(K, pt2)
 
-        #cv2.circle(img, (u1,v1), 3, (0,255,0), 2)
         cv2.circle(img, (u1,v1), 2, (77, 243, 255))
 
         cv2.line(img, (u1,v1), (u2, v2), (255,0,0))
