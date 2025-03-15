@@ -75,20 +75,26 @@ def process_frame(img):
     # The homogeneous coordinates [𝑋, 𝑌, 𝑍, 𝑊] are converted to Euclidean coordinates
     pts4d /= pts4d[:, 3:]
 
+    good_pts4d = (np.abs(pts4d[:, 3]) > 0.001) #  & (pts4d[:, 2] > 0)
+    
+    latest_cam_pos = f1.pose[:3, 3]
+    distance_from_camera = np.linalg.norm(pts4d[:, :3] - latest_cam_pos, axis=1)
+    good_pts4d = good_pts4d & (distance_from_camera < 20)
 
-    # Reject points without enough "Parallax" and points behind the camera
-    # checks if the absolute value of the fourth coordinate W is greater than 0.005.
-    # checks if the z-coordinate of the points is positive.
-    # returns, A boolean array indicating which points satisfy both criteria.
-    good_pts4d = (np.abs(pts4d[:, 3]) > 0.005) & (pts4d[:, 2] > 0)
-    #mapp.clear_far_points(20)
     for i, p in enumerate(pts4d):
         #  If the point is not good (i.e., good_pts4d[i] is False), the loop skips the current iteration and moves to the next point.
         if not good_pts4d[i]:
             continue
         pt = Point(mapp, p)
-        pt.add_observation(f1, i)
-        pt.add_observation(f2, i)
+        pt.add_observation(f1, idx1[i])
+        pt.add_observation(f2, idx2[i])
+    
+    if frame_counter % 5 == 0 and len(mapp.frames) >= 3:
+        mapp.optimize() 
+
+    # if(frame_counter % 10 == 0 and len(mapp.points) > 50):
+    #     mapp.clear_far_points(20)
+    #     mapp.filter_by_reprojection_error(K,3.0)
 
     for pt1, pt2 in zip(f1.pts[idx1], f2.pts[idx2]):
         u1, v1 = denormalize(K, pt1)
