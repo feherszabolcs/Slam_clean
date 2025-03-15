@@ -129,63 +129,26 @@ class Map(object):
         # Finishes the current frame and swaps the buffers.
         pypangolin.FinishFrame()
     
-    def clear_far_points(self, distance_threshold):
-        if len(self.frames) < 2 or len(self.points) < 10:
-            return
-        
-        points_to_remove = []
-        
-        # Get the latest camera position
-        latest_pose = self.frames[-1].pose
-        camera_position = latest_pose[:3, 3]
-        
-        for point in self.points:
-            # Calculate distance from point to camera
-            point_position = point.pt[:3]
-            distance = np.linalg.norm(point_position - camera_position)
-            
-            if distance > distance_threshold:
-                points_to_remove.append(point)
-        
-        max_remove = min(len(points_to_remove), len(self.points) // 10)
-        if(max_remove > 0):
-            for point in points_to_remove[:max_remove]:
-                if(point in self.points):
-                    self.points.remove(point)
-
-    def remove_statistical_outliers(self, k=3.0):  # Increased k value
-        """Remove statistical outliers based on distance to neighbors"""
+    def remove_radius_outliers(self, radius=1.0, min_neighbors=2):
+        """Remove points that have fewer than min_neighbors within a given radius"""
         if len(self.points) < 50:  # Only run when we have enough points
             return
         
         # Extract all point positions
         positions = np.array([point.pt[:3] for point in self.points])
         
-        # Calculate mean distance to all other points for each point
-        mean_distances = []
-        for pos in positions:
+        # Calculate the number of neighbors within the radius for each point
+        neighbors_count = np.zeros(len(self.points), dtype=int)
+        for i, pos in enumerate(positions):
             distances = np.linalg.norm(positions - pos, axis=1)
-            # Exclude self-distance (which is 0)
-            distances = distances[distances > 0]
-            mean_distances.append(np.mean(distances))
+            neighbors_count[i] = np.sum(distances < radius) - 1  # Exclude self-distance
         
-        mean_distances = np.array(mean_distances)
-        
-        # Calculate mean and standard deviation of these mean distances
-        global_mean = np.mean(mean_distances)
-        global_std = np.std(mean_distances)
-        
-        # Identify outliers (only extreme ones)
-        outlier_indices = np.where(mean_distances > global_mean + k * global_std)[0]
-        
-        # Don't remove too many points at once
-        max_remove = min(len(outlier_indices), len(self.points) // 20)  # Remove at most 5% of points
+        # Identify outliers
+        outlier_indices = np.where(neighbors_count < min_neighbors)[0]
         
         # Remove outliers (in reverse order to avoid index issues)
-        if max_remove > 0:
-            for idx in sorted(outlier_indices[:max_remove], reverse=True):
-                if idx < len(self.points):
-                    self.points.pop(idx)
+        for idx in sorted(outlier_indices, reverse=True):
+            self.points.pop(idx)
 
     def filter_by_reprojection_error(self,K, error_threshold=2.0):
         """Remove points with high reprojection error"""

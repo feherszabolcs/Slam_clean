@@ -94,6 +94,7 @@ def process_frame(img):
 
     if(frame_counter % 10 == 0 and len(mapp.points) > 50):
         mapp.filter_by_reprojection_error(K,3.0)
+        mapp.remove_radius_outliers(radius=1.0, min_neighbors=2)
 
     for pt1, pt2 in zip(f1.pts[idx1], f2.pts[idx2]):
         u1, v1 = denormalize(K, pt1)
