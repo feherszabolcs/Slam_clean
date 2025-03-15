@@ -92,9 +92,8 @@ def process_frame(img):
     if frame_counter % 5 == 0 and len(mapp.frames) >= 3:
         mapp.optimize() 
 
-    # if(frame_counter % 10 == 0 and len(mapp.points) > 50):
-    #     mapp.clear_far_points(20)
-    #     mapp.filter_by_reprojection_error(K,3.0)
+    if(frame_counter % 10 == 0 and len(mapp.points) > 50):
+        mapp.filter_by_reprojection_error(K,3.0)
 
     for pt1, pt2 in zip(f1.pts[idx1], f2.pts[idx2]):
         u1, v1 = denormalize(K, pt1)
